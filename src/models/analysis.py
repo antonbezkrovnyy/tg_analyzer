@@ -26,30 +26,22 @@ class AnalysisMetadata(BaseModel):
     """Metadata about the analysis."""
 
     chat: str = Field(..., description="Chat name")
+    chat_username: str = Field(..., description="Chat username for links")
     date: str = Field(..., description="Date in YYYY-MM-DD format")
     analyzed_at: datetime = Field(
         default_factory=datetime.now,
         description="Timestamp when analysis was performed",
     )
-    model: str = Field(..., description="GigaChat model used")
-    message_count: int = Field(..., description="Number of messages analyzed")
+    total_messages: int = Field(..., description="Total messages in source")
+    analyzed_messages: int = Field(..., description="Number of messages analyzed")
     tokens_used: int = Field(..., description="Total tokens used in API call")
-    analysis_duration_seconds: float = Field(..., description="Time taken for analysis")
+    model: str = Field(..., description="GigaChat model used")
+    latency_seconds: float = Field(..., description="Time taken for analysis")
 
 
-class AnalysisData(BaseModel):
-    """Analysis results data."""
+class AnalysisResult(BaseModel):
+    """Analysis results with discussions."""
 
     discussions: list[Discussion] = Field(
         default_factory=list, description="List of identified discussions"
     )
-
-
-class AnalysisResult(BaseModel):
-    """Complete analysis result."""
-
-    version: str = Field(default="1.0", description="Schema version")
-    metadata: AnalysisMetadata
-    prompt: str = Field(..., description="Prompt sent to GigaChat")
-    raw_response: str = Field(..., description="Raw response from GigaChat")
-    analysis: AnalysisData

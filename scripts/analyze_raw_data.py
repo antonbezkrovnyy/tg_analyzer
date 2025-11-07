@@ -46,7 +46,7 @@ for msg in messages[:50]:
 root_messages = [(msg_id, len(replies)) for msg_id, replies in reply_chains.items()]
 root_messages.sort(key=lambda x: x[1], reverse=True)
 
-print(f"\nТоп сообщений с ответами (первые 50):")
+print("\nТоп сообщений с ответами (первые 50):")
 for msg_id, reply_count in root_messages[:10]:
     msg = next((m for m in messages if m["id"] == msg_id), None)
     if msg:
