@@ -96,6 +96,7 @@ class AnalyzerService:
         response = await self.gigachat_client.complete(
             messages=[GigaChatMessage(role="user", content=prompt)],
             temperature=0.5,
+            max_tokens=8192,  # Increase output limit for large responses
         )
 
         latency = time.time() - start_time
@@ -107,6 +108,11 @@ class AnalyzerService:
         # Step 4: Parse response
         logger.info("Step 4: Parsing response...")
         response_text = response.choices[0].message.content
+        logger.info(f"Response length: {len(response_text)} chars")
+
+        # Log full response if it's short (likely an error)
+        if len(response_text) < 1000:
+            logger.warning(f"Short response detected, full text:\n{response_text}")
 
         # Extract JSON from markdown code blocks if present
         if "```json" in response_text:
