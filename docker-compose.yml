@@ -1,0 +1,98 @@
+version: '3.8'
+
+services:
+  tg_analyzer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tg_analyzer
+    image: tg_analyzer:latest
+    environment:
+      - GIGACHAT_API_KEY=${GIGACHAT_API_KEY}
+      - GIGACHAT_BASE_URL=${GIGACHAT_BASE_URL:-https://gigachat.devices.sberbank.ru/api/v1}
+      - GIGACHAT_MODEL=${GIGACHAT_MODEL:-GigaChat-Lite}
+      - TG_FETCHER_DATA_PATH=/data
+      - OUTPUT_PATH=/output
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOKI_URL=${LOKI_URL:-http://loki:3100}
+      - PROMETHEUS_PUSHGATEWAY_URL=${PROMETHEUS_PUSHGATEWAY_URL:-http://pushgateway:9091}
+    volumes:
+      # Mount data from tg_fetcher
+      - ../python-tg/data:/data:ro
+      # Mount output directory
+      - ./output:/output
+    networks:
+      - analyzer_network
+      - observability_network
+    depends_on:
+      - loki
+      - prometheus
+    restart: unless-stopped
+
+  # Observability Stack (optional, can use external)
+  loki:
+    image: grafana/loki:2.9.3
+    container_name: loki
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./infrastructure/observability-stack/config/loki:/etc/loki
+      - loki_data:/loki
+    command: -config.file=/etc/loki/loki-config.yml
+    networks:
+      - observability_network
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infrastructure/observability-stack/config/prometheus:/etc/prometheus
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    networks:
+      - observability_network
+    restart: unless-stopped
+
+  pushgateway:
+    image: prom/pushgateway:v1.6.2
+    container_name: pushgateway
+    ports:
+      - "9091:9091"
+    networks:
+      - observability_network
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:10.2.2
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - ./infrastructure/observability-stack/config/grafana/provisioning:/etc/grafana/provisioning
+      - ./infrastructure/observability-stack/dashboards:/var/lib/grafana/dashboards
+      - grafana_data:/var/lib/grafana
+    networks:
+      - observability_network
+    depends_on:
+      - loki
+      - prometheus
+    restart: unless-stopped
+
+networks:
+  analyzer_network:
+    driver: bridge
+  observability_network:
+    driver: bridge
+
+volumes:
+  loki_data:
+  prometheus_data:
+  grafana_data:
