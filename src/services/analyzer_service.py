@@ -128,6 +128,11 @@ class AnalyzerService:
         result = AnalysisResult(discussions=analysis_data["discussions"])
         logger.info(f"✓ Parsed {len(result.discussions)} discussions\n")
 
+        # Step 4.5: Enrich discussions with calculated metrics
+        logger.info("Step 4.5: Calculating metrics...")
+        self._enrich_discussions(result.discussions)
+        logger.info("✓ Metrics calculated\n")
+
         # Step 5: Validate links (if enabled)
         if self.validate_links:
             logger.info("Step 5: Validating message links...")
@@ -145,6 +150,10 @@ class AnalyzerService:
 
         # Step 6: Save results
         logger.info("Step 6: Saving results...")
+
+        # Generate discussion statistics
+        discussion_stats = self._calculate_stats(result.discussions)
+
         metadata = AnalysisMetadata(
             chat=chat,
             chat_username=chat_username,
@@ -155,6 +164,7 @@ class AnalyzerService:
             tokens_used=response.usage.total_tokens,
             model=response.model,
             latency_seconds=latency,
+            discussion_stats=discussion_stats,
         )
 
         saved_path = self.analysis_repo.save(chat, date, result, metadata)
@@ -207,3 +217,96 @@ class AnalyzerService:
                     errors.append(f"{topic}: Message {msg_id} not in analyzed messages")
 
         return errors
+
+    def _enrich_discussions(self, discussions: list) -> None:
+        """Calculate and set automatic metrics for discussions.
+
+        Args:
+            discussions: List of Discussion objects to enrich
+        """
+        for disc in discussions:
+            # Ensure it's a Discussion object (not dict)
+            if isinstance(disc, dict):
+                continue
+
+            # Calculate participant_count and message_count
+            disc.participant_count = len(disc.participants)
+            disc.message_count = len(disc.message_links)
+
+            # Calculate priority based on metrics
+            disc.priority = self._calculate_priority(
+                disc.participant_count,
+                disc.message_count,
+                disc.practical_value,
+            )
+
+    def _calculate_priority(
+        self, participant_count: int, message_count: int, practical_value: int
+    ) -> str:
+        """Calculate discussion priority based on metrics.
+
+        Args:
+            participant_count: Number of participants
+            message_count: Number of messages
+            practical_value: Practical value (1-10)
+
+        Returns:
+            Priority level: "high", "medium", or "low"
+        """
+        if participant_count >= 5 or message_count >= 10 or practical_value >= 8:
+            return "high"
+        elif participant_count >= 3 or message_count >= 5 or practical_value >= 5:
+            return "medium"
+        else:
+            return "low"
+
+    def _calculate_stats(self, discussions: list) -> dict:
+        """Generate statistics about discussions.
+
+        Args:
+            discussions: List of Discussion objects
+
+        Returns:
+            Dictionary with statistics
+        """
+        from collections import Counter
+        from statistics import mean
+
+        if not discussions:
+            return {}
+
+        # Extract all keywords
+        all_keywords = []
+        for disc in discussions:
+            all_keywords.extend(disc.keywords)
+
+        # Count by priority
+        priority_counts = Counter(disc.priority for disc in discussions)
+
+        # Count by complexity
+        complexity_counts = Counter(str(disc.complexity) for disc in discussions)
+
+        # Count by sentiment
+        sentiment_counts = Counter(disc.sentiment for disc in discussions)
+
+        # Calculate averages
+        avg_participants = mean(disc.participant_count for disc in discussions)
+        avg_messages = mean(disc.message_count for disc in discussions)
+        avg_complexity = mean(disc.complexity for disc in discussions)
+        avg_practical_value = mean(disc.practical_value for disc in discussions)
+
+        # Top keywords
+        keyword_counter = Counter(all_keywords)
+        top_keywords = [kw for kw, _ in keyword_counter.most_common(10)]
+
+        return {
+            "total_discussions": len(discussions),
+            "by_priority": dict(priority_counts),
+            "by_complexity": dict(complexity_counts),
+            "by_sentiment": dict(sentiment_counts),
+            "avg_participants": round(avg_participants, 1),
+            "avg_messages": round(avg_messages, 1),
+            "avg_complexity": round(avg_complexity, 1),
+            "avg_practical_value": round(avg_practical_value, 1),
+            "top_keywords": top_keywords,
+        }
