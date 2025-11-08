@@ -33,10 +33,13 @@ MERGE_PROMPT_TEMPLATE = """Ты - эксперт по анализу Telegram ч
 3. Для объединённых дискуссий:
    - Создай общий topic (краткое название)
    - Объедини keywords (уникальные)
-   - Объедини participants (уникальные)
+   - Объедини participants (уникальные, МАССИВ строк)
    - Объедини message_links (все ссылки)
    - Создай новый summary (общее описание)
-   - Создай новый expert_comment (экспертная оценка всей темы)
+   - Создай новый expert_comment (структурированный объект с 5 полями)
+   - Усредни complexity (1-5)
+   - Определи общий sentiment (positive/negative/neutral/mixed)
+   - Усредни practical_value (1-10)
 
 **Входные дискуссии:**
 
@@ -44,18 +47,27 @@ MERGE_PROMPT_TEMPLATE = """Ты - эксперт по анализу Telegram ч
 
 **Выходной формат:**
 
-Верни JSON с объединёнными дискуссиями в том же формате:
+Верни JSON с объединёнными дискуссиями в формате:
 
 ```json
 {{
   "discussions": [
     {{
       "topic": "...",
-      "keywords": [...],
-      "participants": [...],
+      "keywords": ["...", "..."],
+      "participants": ["Имя1", "Имя2"],
       "summary": "...",
-      "expert_comment": "...",
-      "message_links": [...]
+      "expert_comment": {{
+        "problem_analysis": "...",
+        "common_mistakes": ["...", "..."],
+        "best_practices": ["...", "..."],
+        "actionable_insights": ["...", "..."],
+        "learning_resources": ["https://...", "..."]
+      }},
+      "message_links": ["https://t.me/...", "..."],
+      "complexity": 3,
+      "sentiment": "neutral",
+      "practical_value": 7
     }}
   ]
 }}
@@ -66,6 +78,11 @@ MERGE_PROMPT_TEMPLATE = """Ты - эксперт по анализу Telegram ч
 - Если сомневаешься - лучше объединить
 - Сохраняй все message_links из всех объединённых дискуссий
 - В summary укажи, что это объединённая дискуссия из N частей (если актуально)
+- participants MUST be array of strings, NOT comma-separated string
+- expert_comment MUST be object with 5 fields, NOT string
+- complexity: average of merged discussions (round to integer)
+- sentiment: dominant sentiment or "mixed" if conflicting
+- practical_value: average of merged discussions (round to integer)
 """
 
 
@@ -145,6 +162,8 @@ async def main() -> None:
                 logger.error(f"Short response: {response_text}")
                 continue
 
+            logger.info(f"Response preview (first 500 chars): {response_text[:500]}")
+
             # Extract JSON
             if "```json" in response_text:
                 json_start = response_text.find("```json") + 7
@@ -154,6 +173,9 @@ async def main() -> None:
                 json_start = response_text.find("```") + 3
                 json_end = response_text.find("```", json_start)
                 response_text = response_text[json_start:json_end].strip()
+
+            logger.info(f"Extracted JSON length: {len(response_text)} chars")
+            logger.info(f"Extracted JSON preview: {response_text[:300]}")
 
             try:
                 merged_data = json.loads(response_text)
@@ -178,6 +200,18 @@ async def main() -> None:
     merged_result = AnalysisResult(discussions=all_merged)
     merged_count = len(merged_result.discussions)
     logger.info(f"✓ Total merged: {original_count} → {merged_count} discussions")
+
+    # Recalculate metrics for merged discussions
+    logger.info("Recalculating metrics...")
+    from src.services.analyzer_service import AnalyzerService
+
+    # Create a temporary instance to use helper methods
+    temp_service = AnalyzerService(None, None, None, None)  # type: ignore
+    temp_service._enrich_discussions(merged_result.discussions)
+
+    # Recalculate statistics
+    metadata.discussion_stats = temp_service._calculate_stats(merged_result.discussions)
+    logger.info("✓ Metrics recalculated")
 
     # Save merged result
     analysis_repo.save(chat, date, merged_result, metadata)
