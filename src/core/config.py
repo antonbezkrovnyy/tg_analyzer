@@ -49,6 +49,22 @@ class Settings(BaseSettings):
         description="Path to output directory for analysis results",
     )
 
+    # Redis Configuration (for event subscriptions)
+    redis_url: str = Field(
+        default="redis://localhost:6379",
+        description="Redis connection URL for PubSub events",
+    )
+    redis_password: Optional[str] = Field(
+        default=None,
+        description="Redis password (if authentication is enabled)",
+    )
+
+    # Analysis Settings
+    window_size: int = Field(
+        default=30,
+        description="Default window size for message analysis",
+    )
+
     # Logging Configuration
     log_level: str = Field(
         default="INFO",

@@ -19,10 +19,40 @@ Analyze Telegram chat messages using **Sber GigaChat API** (Russian LLM).
 ## 🏗️ Architecture
 
 ```
-tg_fetcher → JSON dumps → tg_analyzer → GigaChat API → Analysis Results
-                                     ↓
-                         observability-stack (logs/metrics)
+                    ┌─────────────────────────────────────┐
+                    │   Shared Infrastructure Stack       │
+                    │  (c:\...\Desktop\infrastructure)    │
+                    │                                     │
+                    │  • Redis (Event Bus)                │
+                    │  • Loki (Centralized Logging)       │
+                    │  • Prometheus (Metrics Storage)     │
+                    │  • Grafana (Visualization)          │
+                    │  • Pushgateway (Batch Job Metrics)  │
+                    └─────────────────────────────────────┘
+                         ▲                          ▲
+                         │                          │
+            ┌────────────┴────────────┐  ┌──────────┴──────────┐
+            │                         │  │                     │
+    ┌───────▼──────────┐    ┌────────▼──▼─────────┐
+    │   tg_fetcher     │───▶│    tg_analyzer      │
+    │  (python-tg)     │    │  (this project)     │
+    │                  │    │                     │
+    │  Collects msgs   │    │  Analyzes via       │
+    │  from Telegram   │    │  GigaChat API       │
+    └──────────────────┘    └─────────────────────┘
+           │                           │
+           │                           │
+           ▼                           ▼
+    data/*.json                 output/*.json
+    (messages)                  (analysis)
 ```
+
+**Data Flow:**
+1. `tg_fetcher` saves messages to `data/*.json`
+2. `tg_analyzer` reads messages, sends to GigaChat API
+3. Analysis results saved to `output/*.json`
+4. Logs sent to Loki, metrics to Prometheus
+5. View everything in Grafana
 
 ## 🚀 Quick Start
 
@@ -30,8 +60,32 @@ tg_fetcher → JSON dumps → tg_analyzer → GigaChat API → Analysis Results
 - Python 3.11+
 - GigaChat API key ([get here](https://developers.sber.ru/gigachat))
 - JSON dumps from tg_fetcher
+- **Shared Infrastructure Stack running** (see below)
 
-### Installation
+### Step 1: Start Shared Infrastructure
+
+```powershell
+# Navigate to infrastructure directory
+cd 'c:\Users\Мой компьютер\Desktop\infrastructure'
+
+# Start infrastructure stack
+docker-compose up -d
+
+# Verify all services are healthy
+docker-compose ps
+```
+
+Expected output:
+```
+NAME             STATUS
+tg-grafana       Up (healthy)
+tg-loki          Up (healthy)
+tg-prometheus    Up (healthy)
+tg-pushgateway   Up (healthy)
+tg-redis         Up (healthy)
+```
+
+### Step 2: Installation
 
 **Local Development:**
 ```powershell
@@ -48,35 +102,71 @@ pip install -r requirements-dev.txt
 
 # Configure environment
 cp .env.example .env
-# Edit .env and add your GIGACHAT_API_KEY
+# Edit .env and add your GIGACHAT_AUTH_KEY
 
 # Install pre-commit hooks
 pre-commit install
 ```
 
-**Docker:**
+**Docker (Recommended):**
 ```powershell
-# Build and run
-docker-compose up --build
+# Ensure shared infrastructure is running first!
+cd 'c:\Users\Мой компьютер\Desktop\infrastructure'
+docker-compose ps  # All services should be healthy
+
+# Build and run tg_analyzer
+cd 'c:\Users\Мой компьютер\Desktop\tg_analyzer'
+docker-compose up -d --build
+
+# Verify connection to shared infrastructure
+docker exec tg_analyzer python test_infrastructure.py
+```
+
+Expected test output:
+```
+============================================================
+Redis               : ✅ PASSED
+Loki                : ✅ PASSED
+Pushgateway         : ✅ PASSED
+Data Volume         : ✅ PASSED
+============================================================
+🎉 All tests PASSED! Infrastructure integration is working.
 ```
 
 ## 📖 Usage
 
-### CLI Interface
+### Docker (Production)
+
+**Run analysis for a specific date:**
+```powershell
+docker-compose run --rm tg_analyzer ru_python 2025-11-08
+```
+
+**With force re-analysis:**
+```powershell
+docker-compose run --rm tg_analyzer ru_python 2025-11-08 --force
+```
+
+**Custom window size:**
+```powershell
+docker-compose run --rm tg_analyzer ru_python 2025-11-08 --window-size 100
+```
+
+### CLI Interface (Local Development)
 
 **Analyze a chat for a specific date:**
 ```powershell
-python -m src.main analyze --chat ru_python --date 2025-11-06
+python -m src.cli.analyze ru_python 2025-11-08
 ```
 
-**With custom output path:**
+**With force re-analysis:**
 ```powershell
-python -m src.main analyze --chat ru_python --date 2025-11-06 --output ./results/
+python -m src.cli.analyze ru_python 2025-11-08 --force
 ```
 
-**Using different GigaChat model:**
+**Custom window size:**
 ```powershell
-python -m src.main analyze --chat ru_python --date 2025-11-06 --model GigaChat-Plus
+python -m src.cli.analyze ru_python 2025-11-08 --window-size 100
 ```
 
 ### Output Example

@@ -46,5 +46,5 @@ USER analyzer
 ENV PYTHONUNBUFFERED=1
 
 # Entry point
-ENTRYPOINT ["python", "-m", "src.main"]
+ENTRYPOINT ["python", "-m", "src.cli.analyze"]
 CMD ["--help"]
