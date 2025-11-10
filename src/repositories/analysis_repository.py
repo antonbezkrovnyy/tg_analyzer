@@ -6,18 +6,35 @@ from pathlib import Path
 from typing import Optional
 
 from src.models.analysis import AnalysisMetadata, AnalysisResult
+from src.core.config import settings
 
 
 class AnalysisRepository:
     """Repository for managing analysis results in output directory."""
 
-    def __init__(self, output_dir: Path = Path("output")):
+    def __init__(self, output_dir: Path | None = None):
         """Initialize repository.
 
         Args:
-            output_dir: Base directory for output files (default: "output")
+            output_dir: Base directory for output files. If None, uses
+                settings.output_path (supports container mount like "/output").
         """
-        self.output_dir = output_dir
+        # Use configured output path when not explicitly provided
+        self.output_dir = Path(output_dir or settings.output_path)
+
+    def _normalize_chat(self, chat: str) -> str:
+        """Normalize chat identifier to a filesystem-friendly folder name.
+
+        Strips a leading '@' to align with fetcher data layout and historical
+        output structure (e.g., "@ru_python" -> "ru_python").
+
+        Args:
+            chat: Chat identifier from events or inputs
+
+        Returns:
+            Normalized chat directory name
+        """
+        return chat[1:] if chat.startswith("@") else chat
 
     def save(
         self,
@@ -43,8 +60,9 @@ class AnalysisRepository:
         if not chat or not date:
             raise ValueError("Chat and date must be non-empty")
 
-        # Create directory structure
-        chat_dir = self.output_dir / chat
+        # Create directory structure (normalized)
+        normalized_chat = self._normalize_chat(chat)
+        chat_dir = self.output_dir / normalized_chat
         chat_dir.mkdir(parents=True, exist_ok=True)
 
         # Prepare data
@@ -73,7 +91,8 @@ class AnalysisRepository:
         Raises:
             FileNotFoundError: If analysis doesn't exist
         """
-        file_path = self.output_dir / chat / f"{date}.json"
+        normalized_chat = self._normalize_chat(chat)
+        file_path = self.output_dir / normalized_chat / f"{date}.json"
 
         if not file_path.exists():
             raise FileNotFoundError(f"Analysis not found: {chat}/{date}.json")
@@ -96,7 +115,8 @@ class AnalysisRepository:
         Returns:
             True if analysis file exists
         """
-        file_path = self.output_dir / chat / f"{date}.json"
+        normalized_chat = self._normalize_chat(chat)
+        file_path = self.output_dir / normalized_chat / f"{date}.json"
         return file_path.exists()
 
     def list_dates(self, chat: str) -> list[str]:
@@ -108,7 +128,8 @@ class AnalysisRepository:
         Returns:
             List of dates in YYYY-MM-DD format, sorted
         """
-        chat_dir = self.output_dir / chat
+        normalized_chat = self._normalize_chat(chat)
+        chat_dir = self.output_dir / normalized_chat
 
         if not chat_dir.exists():
             return []
@@ -145,7 +166,8 @@ class AnalysisRepository:
         Returns:
             True if file was deleted, False if didn't exist
         """
-        file_path = self.output_dir / chat / f"{date}.json"
+        normalized_chat = self._normalize_chat(chat)
+        file_path = self.output_dir / normalized_chat / f"{date}.json"
 
         if not file_path.exists():
             return False

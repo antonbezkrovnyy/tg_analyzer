@@ -6,6 +6,8 @@ click>=8.1.0
 python-dotenv>=1.0.0
 prometheus-client>=0.19.0
 redis>=5.0.0
+python-json-logger>=2.0.7
+python-logging-loki>=0.3.1
 
 # Note: For full observability integration, copy observability package from:
 # c:\Users\Мой компьютер\Desktop\infrastructure\python-package\observability/

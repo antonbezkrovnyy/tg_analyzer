@@ -70,6 +70,10 @@ class Settings(BaseSettings):
         default="INFO",
         description="Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)",
     )
+    log_format: str = Field(
+        default="json",
+        description="Log output format: 'json' or 'text'",
+    )
 
     # Observability Stack
     loki_url: Optional[HttpUrl] = Field(

@@ -29,7 +29,10 @@ from src.models.gigachat import (
     GigaChatOAuthResponse,
 )
 
-logger = logging.getLogger(__name__)
+from src.observability.logging_config import get_logger
+from src.utils.correlation import get_correlation_id
+
+logger = get_logger(__name__)
 
 
 class GigaChatClient:
@@ -94,10 +97,16 @@ class GigaChatClient:
         if self._access_token and self._token_expires_at:
             # Refresh if less than 5 minutes remaining
             if datetime.now() + timedelta(minutes=5) < self._token_expires_at:
-                logger.debug("Using existing access token")
+                logger.debug(
+                    "Using existing access token",
+                    extra={"correlation_id": get_correlation_id()},
+                )
                 return self._access_token
 
-        logger.info("Requesting new access token from GigaChat")
+        logger.info(
+            "Requesting new access token from GigaChat",
+            extra={"correlation_id": get_correlation_id()},
+        )
 
         if not self._client:
             raise GigaChatAuthError("HTTP client not initialized")
@@ -134,7 +143,13 @@ class GigaChatClient:
                 oauth_response.expires_at / 1000
             )
 
-            logger.info(f"Access token obtained, expires at {self._token_expires_at}")
+            logger.info(
+                "Access token obtained",
+                extra={
+                    "expires_at": self._token_expires_at.isoformat() if self._token_expires_at else None,
+                    "correlation_id": get_correlation_id(),
+                },
+            )
 
             return self._access_token
 

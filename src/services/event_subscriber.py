@@ -12,7 +12,10 @@ from typing import Any, Callable, Optional
 
 import redis.asyncio as redis
 
-logger = logging.getLogger(__name__)
+from src.observability.logging_config import get_logger
+from src.utils.correlation import CorrelationContext
+
+logger = get_logger(__name__)
 
 
 class EventSubscriber:
@@ -153,31 +156,40 @@ class EventSubscriber:
             # Parse event
             event_data = json.loads(event_json)
             event_type = event_data.get("event")
+            correlation_id = event_data.get("correlation_id")
 
-            logger.info(
-                "Received event",
-                extra={
-                    "event": event_type,
-                    "chat": event_data.get("chat"),
-                    "date": event_data.get("date"),
-                    "message_count": event_data.get("message_count"),
-                    "worker_id": self.worker_id,
-                },
-            )
+            with CorrelationContext(correlation_id) as corr_id:
+                logger.info(
+                    "Received event",
+                    extra={
+                        "correlation_id": corr_id,
+                        "event": event_type,
+                        "chat": event_data.get("chat"),
+                        "date": event_data.get("date"),
+                        "message_count": event_data.get("message_count"),
+                        "worker_id": self.worker_id,
+                    },
+                )
 
             # Process messages_fetched event
             if event_type == "messages_fetched":
                 if self.event_handler:
                     await self.event_handler(event_data)
                 else:
-                    logger.warning("No event handler registered")
+                    logger.warning(
+                        "No event handler registered",
+                        extra={"correlation_id": corr_id},
+                    )
 
             elif event_type == "fetch_failed":
                 chat = event_data.get("chat")
                 date = event_data.get("date")
                 logger.warning(
-                    f"Fetch failed for {chat}/{date}",
+                    "Fetch failed",
                     extra={
+                        "correlation_id": corr_id,
+                        "chat": chat,
+                        "date": date,
                         "error": event_data.get("error"),
                         "event_data": event_data,
                     },
@@ -185,8 +197,12 @@ class EventSubscriber:
 
             else:
                 logger.warning(
-                    f"Unknown event type: {event_type}",
-                    extra={"event_data": event_data},
+                    "Unknown event type",
+                    extra={
+                        "correlation_id": corr_id,
+                        "event_type": event_type,
+                        "event_data": event_data,
+                    },
                 )
 
         except json.JSONDecodeError as e:

@@ -24,6 +24,20 @@ class MessageRepository:
         """
         self._data_path = data_path or settings.tg_fetcher_data_path
 
+    def _normalize_chat(self, chat: str) -> str:
+        """Normalize chat identifier to match filesystem layout.
+
+        The fetcher stores data in directories named without leading '@'.
+        This method strips a leading '@' if present to ensure path resolution.
+
+        Args:
+            chat: Chat identifier, e.g. "@ru_python" or "ru_python".
+
+        Returns:
+            Normalized chat name without leading '@'.
+        """
+        return chat[1:] if chat.startswith("@") else chat
+
     def load_messages(self, chat: str, date: str) -> MessageDump:
         """Load messages for specific chat and date.
 
@@ -38,7 +52,8 @@ class MessageRepository:
             DataNotFoundError: If file not found
             DataValidationError: If data validation fails
         """
-        file_path = self._data_path / chat / f"{date}.json"
+        normalized_chat = self._normalize_chat(chat)
+        file_path = self._data_path / normalized_chat / f"{date}.json"
 
         logger.info(f"Loading messages from {file_path}")
 
@@ -83,7 +98,8 @@ class MessageRepository:
         Returns:
             List of dates in YYYY-MM-DD format
         """
-        chat_path = self._data_path / chat
+        normalized_chat = self._normalize_chat(chat)
+        chat_path = self._data_path / normalized_chat
 
         if not chat_path.exists():
             logger.warning(f"Chat directory not found: {chat_path}")

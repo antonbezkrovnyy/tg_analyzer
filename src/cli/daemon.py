@@ -5,7 +5,6 @@ telegram-fetcher and automatically triggers analysis.
 """
 
 import asyncio
-import logging
 import signal
 import sys
 from datetime import datetime
@@ -13,14 +12,16 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from src.core.config import settings
+from src.observability.logging_config import get_logger, setup_logging
 from src.repositories.analysis_repository import AnalysisRepository
 from src.repositories.message_repository import MessageRepository
 from src.services.analyzer_service import AnalyzerService
 from src.services.event_subscriber import EventSubscriber
 from src.services.gigachat_client import GigaChatClient
 from src.services.prompt_builder import PromptBuilder
+from src.utils.correlation import CorrelationContext
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class AnalyzerDaemon:
@@ -45,8 +46,12 @@ class AnalyzerDaemon:
     async def setup(self) -> None:
         """Initialize services and connections."""
         logger.info(
-            f"Starting Analyzer Daemon [Worker: {self.worker_id}]",
-            extra={"worker_id": self.worker_id},
+              "Starting Analyzer Daemon",
+              extra={
+                 "worker_id": self.worker_id,
+                 "redis_url": settings.redis_url,
+                 "loki_url": settings.loki_url,
+              },
         )
 
         # Initialize repositories
@@ -95,67 +100,96 @@ class AnalyzerDaemon:
                     "message_count": 580,
                     "file_path": "/data/ru_python/2025-11-08.json",
                     "timestamp": "2025-11-08T10:30:00Z"
+                        "correlation_id": "abc-123-xyz" (optional)
                 }
         """
-        chat = event_data.get("chat")
-        date = event_data.get("date")
-        message_count = event_data.get("message_count", 0)
+        # Extract correlation_id from event or generate new one
+        correlation_id = event_data.get("correlation_id")
 
-        if not chat or not date:
-            logger.error(
-                "Invalid event data: missing chat or date",
-                extra={"event_data": event_data},
-            )
-            return
+        # Use correlation context for tracking
+        with CorrelationContext(correlation_id) as corr_id:
+            chat = event_data.get("chat")
+            date = event_data.get("date")
+            message_count = event_data.get("message_count", 0)
 
-        logger.info(
-            f"Triggering analysis for {chat}/{date} " f"({message_count} messages)",
-            extra={
-                "chat": chat,
-                "date": date,
-                "message_count": message_count,
-                "worker_id": self.worker_id,
-            },
-        )
-
-        try:
-            start_time = datetime.utcnow()
-
-            # Run analysis
-            if self.analyzer_service is None:
-                raise RuntimeError("AnalyzerService not initialized")
-
-            result, metadata = await self.analyzer_service.analyze(
-                chat=chat,
-                date=date,
-                window_size=settings.window_size,
-            )
-
-            duration = (datetime.utcnow() - start_time).total_seconds()
+            if not chat or not date:
+                logger.error(
+                    "Invalid event data: missing chat or date",
+                    extra={
+                        "correlation_id": corr_id,
+                        "event_data": event_data,
+                        "worker_id": self.worker_id,
+                    },
+                )
+                return
 
             logger.info(
-                f"Analysis completed successfully for {chat}/{date}",
+                "Triggering analysis",
                 extra={
+                    "correlation_id": corr_id,
                     "chat": chat,
                     "date": date,
-                    "discussions": len(result.discussions),
-                    "tokens_used": metadata.tokens_used,
-                    "duration_seconds": round(duration, 2),
+                    "message_count": message_count,
                     "worker_id": self.worker_id,
+                    "event": "analysis_triggered",
                 },
             )
 
-        except FileNotFoundError as e:
-            logger.error(
-                f"Messages file not found for {chat}/{date}: {e}",
-                extra={"chat": chat, "date": date, "error": str(e)},
-            )
-        except Exception as e:
-            logger.error(
-                f"Analysis failed for {chat}/{date}: {e}",
-                extra={"chat": chat, "date": date, "error": str(e)},
-                exc_info=True,
-            )
+            try:
+                start_time = datetime.utcnow()
+
+                # Run analysis
+                if self.analyzer_service is None:
+                    raise RuntimeError("AnalyzerService not initialized")
+
+                result, metadata = await self.analyzer_service.analyze(
+                    chat=chat,
+                    date=date,
+                    window_size=settings.window_size,
+                    force=True,
+                )
+
+                duration = (datetime.utcnow() - start_time).total_seconds()
+
+                logger.info(
+                    "Analysis completed successfully",
+                    extra={
+                        "correlation_id": corr_id,
+                        "chat": chat,
+                        "date": date,
+                        "discussions": len(result.discussions),
+                        "tokens_used": metadata.tokens_used,
+                        "duration_seconds": round(duration, 2),
+                        "worker_id": self.worker_id,
+                        "event": "analysis_completed",
+                    },
+                )
+
+            except FileNotFoundError as e:
+                logger.error(
+                    "Messages file not found",
+                    extra={
+                        "correlation_id": corr_id,
+                        "chat": chat,
+                        "date": date,
+                        "error": str(e),
+                        "error_type": "file_not_found",
+                        "worker_id": self.worker_id,
+                    },
+                )
+            except Exception as e:
+                logger.error(
+                    "Analysis failed",
+                    extra={
+                        "correlation_id": corr_id,
+                        "chat": chat,
+                        "date": date,
+                        "error": str(e),
+                        "error_type": type(e).__name__,
+                        "worker_id": self.worker_id,
+                    },
+                    exc_info=True,
+                )
 
     async def run(self) -> None:
         """Run daemon main loop (listen for events)."""
@@ -196,6 +230,14 @@ class AnalyzerDaemon:
 
 async def main() -> None:
     """Entry point for daemon process."""
+    # Setup structured logging
+    setup_logging(
+        level=settings.log_level,
+        log_format=settings.log_format,
+        service_name="tg_analyzer",
+        loki_url=settings.loki_url,
+    )
+
     # Get worker_id from environment or use default
     import os
 
@@ -235,12 +277,5 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    # Configure logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        handlers=[logging.StreamHandler()],
-    )
-
     # Run daemon
     asyncio.run(main())

@@ -77,6 +77,42 @@ class PromptBuilder:
 
         return prompt
 
+    def build_for_subset(
+        self,
+        chat_name: str,
+        chat_username: str,
+        date: str,
+        message_dump: MessageDump,
+        messages_subset: list[Message],
+        format_style: Literal["json", "text"] = "json",
+    ) -> str:
+        """Build prompt for a specific subset of messages.
+
+        Args:
+            chat_name: Human-readable chat name
+            chat_username: Chat username for links (e.g., "ru_python")
+            date: Date in YYYY-MM-DD format
+            message_dump: Message dump with senders/source info
+            messages_subset: Subset of messages to include in prompt
+            format_style: Message formatting style (default: "json")
+
+        Returns:
+            Complete prompt string ready for GigaChat
+        """
+        # Format only provided subset
+        messages_formatted = self.format_messages(
+            messages_subset, message_dump.senders, style=format_style
+        )
+
+        prompt = self.template.format(
+            chat_name=chat_name,
+            chat_username=chat_username,
+            date=date,
+            message_count=len(messages_subset),
+            messages_json=messages_formatted,
+        )
+        return prompt
+
     def format_messages(
         self,
         messages: list[Message],
